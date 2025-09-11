@@ -1,0 +1,24 @@
+name: tnc-m4
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch
+  - torchvision
+  - torchaudio
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - scipy
+  - statsmodels
+  - jupyter
+  - pip
+  - pip:
+    - tslearn
+    - wfdb
+    - pyod
+    # Skip TimeSynth for now - we'll create simulated data differently
