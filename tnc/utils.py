@@ -50,7 +50,7 @@ def track_encoding(sample, label, encoder, window_size, path, sliding_gap=5):
     T = sample.shape[-1]
     windows_label = []
     encodings = []
-    device = 'cuda'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     encoder.to(device)
     encoder.eval()
     for t in range(window_size//2,T-window_size//2,sliding_gap):
