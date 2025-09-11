@@ -127,3 +127,49 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# TNC Project Specific
+# Model checkpoints and training artifacts
+ckpt/
+*.pth
+*.pth.tar
+*.pt
+*.ckpt
+
+# Data files (if large datasets)
+data/simulated_data/
+data/real_data/
+*.pkl
+*.npz
+*.h5
+*.hdf5
+
+# Training logs and outputs
+logs/
+runs/
+wandb/
+tensorboard_logs/
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Conda environment files (keep only the .yml files)
+*.conda
+.conda/
+
+# Temporary files
+*.tmp
+*.temp
