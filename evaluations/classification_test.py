@@ -234,7 +234,8 @@ def run_test(data, e2e_lr, tnc_lr, cpc_lr, trip_lr, data_path, window_size, n_cr
                                            output_size=4, device=device)
 
             tnc_encoder = RnnEncoder(hidden_size=100, in_channel=3, encoding_size=encoding_size, device=device)
-            tnc_checkpoint = torch.load('./ckpt/simulation/checkpoint_%d.pth.tar'%cv)
+            # tnc_checkpoint = torch.load('./ckpt/simulation/checkpoint_%d.pth.tar'%cv)
+            tnc_checkpoint = torch.load(f'./ckpt/simulation/checkpoint_0.pth.tar',map_location=torch.device('cpu'))
             tnc_encoder.load_state_dict(tnc_checkpoint['encoder_state_dict'])
             tnc_classifier = StateClassifier(input_size=encoding_size, output_size=4).to(device)
             tnc_model = torch.nn.Sequential(tnc_encoder, tnc_classifier).to(device)
