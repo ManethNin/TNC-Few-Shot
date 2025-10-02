@@ -1,0 +1,10 @@
+
+
+Performance result for a foldEnd-to-End model: 	 AUC: 0.9997682347236344	 Accuracy: 99.02083333333334 
+
+TNC model: 	 AUC: 0.9944397420801769	 Accuracy: 94.22916666666664 
+
+CPC model: 	 AUC: 0.0	 Accuracy: 0.0 
+
+Triplet Loss model: 	 AUC: 0.0	 Accuracy: 0.0 
+

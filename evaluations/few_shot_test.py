@@ -36,6 +36,17 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 
+# Import improved methods
+try:
+    from evaluations.improved_few_shot import (
+        LinearPrototypicalNetwork, MetricPrototypicalNetwork, 
+        HybridFewShotClassifier, AdaptivePrototypicalNetwork
+    )
+    IMPROVED_METHODS_AVAILABLE = True
+except ImportError:
+    IMPROVED_METHODS_AVAILABLE = False
+    print("⚠️  Improved methods not available - using baseline methods only")
+
 # Set style for plots
 plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
@@ -62,6 +73,22 @@ class FewShotEvaluator:
         print(f"📊 Dataset: {len(self.X_train)} train, {len(self.X_test)} test samples")
         print(f"🎯 Classes: {len(np.unique(self.y_train))} ({np.unique(self.y_train)})")
         print(f"🔧 Feature dimension: {self.encoder.encoding_size}D")
+        
+        # Initialize improved methods if available
+        if IMPROVED_METHODS_AVAILABLE:
+            self._init_improved_methods()
+        
+    def _init_improved_methods(self):
+        """Initialize improved few-shot learning models"""
+        input_dim = self.encoder.encoding_size
+        
+        self.improved_models = {
+            'linear_prototypical': LinearPrototypicalNetwork(input_dim=input_dim, output_dim=16).to(self.device),
+            'metric_prototypical': MetricPrototypicalNetwork(input_dim=input_dim).to(self.device),
+            'hybrid': HybridFewShotClassifier(input_dim=input_dim, n_classes=4).to(self.device),
+            'adaptive': AdaptivePrototypicalNetwork(input_dim=input_dim).to(self.device)
+        }
+        print("🚀 Improved few-shot methods initialized!")
         
     def _load_encoder(self):
         """Load and initialize pre-trained TNC encoder"""
@@ -237,6 +264,136 @@ class FewShotEvaluator:
         print(f"   📈 Accuracy: {mean_acc:.3f} ± {std_acc:.3f}")
         return mean_acc, std_acc
     
+    def improved_prototypical_networks(self, method_name, n_way, n_shot, n_query=15, n_episodes=100):
+        """
+        Improved Prototypical Networks evaluation
+        
+        Args:
+            method_name: Name of improved method ('linear_prototypical', 'metric_prototypical', etc.)
+            n_way: Number of classes per episode
+            n_shot: Number of support examples per class
+            n_query: Number of query examples per class
+            n_episodes: Number of episodes to run
+        """
+        if not IMPROVED_METHODS_AVAILABLE or not hasattr(self, 'improved_models'):
+            print(f"⚠️  Improved method {method_name} not available")
+            return 0.0, 0.0
+            
+        print(f"\n🎯 Running Improved {method_name}: {n_way}-way {n_shot}-shot")
+        
+        model = self.improved_models[method_name]
+        model.train()  # Enable training mode for learning
+        
+        # Train the model first
+        self._train_improved_method(model, method_name, n_way, n_shot, n_episodes=50)
+        
+        # Evaluate the trained model
+        model.eval()
+        accuracies = []
+        
+        import torch
+        
+        for episode in tqdm(range(n_episodes), desc=f"{method_name} {n_way}-way {n_shot}-shot"):
+            # Sample episode data
+            support_x, support_y, query_x, query_y = self._sample_episode(n_way, n_shot, n_query)
+            
+            if len(support_x) == 0 or len(query_x) == 0:
+                continue
+            
+            # Convert to tensors
+            support_features = torch.tensor(support_x, dtype=torch.float32).to(self.device)
+            support_labels = torch.tensor(support_y, dtype=torch.long).to(self.device)
+            query_features = torch.tensor(query_x, dtype=torch.float32).to(self.device)
+            query_labels = torch.tensor(query_y, dtype=torch.long).to(self.device)
+            
+            with torch.no_grad():
+                if method_name == 'hybrid':
+                    logits, _, _, _ = model(support_features, support_labels, 
+                                         query_features, n_way, n_shot)
+                else:
+                    logits = model(support_features, support_labels, 
+                                 query_features, n_way, n_shot)
+                
+                predictions = torch.argmax(logits, dim=1)
+                accuracy = (predictions == query_labels).float().mean().item()
+                accuracies.append(accuracy)
+        
+        mean_acc = np.mean(accuracies)
+        std_acc = np.std(accuracies)
+        
+        print(f"   📈 Accuracy: {mean_acc:.3f} ± {std_acc:.3f}")
+        return mean_acc, std_acc
+    
+    def _sample_episode(self, n_way, n_shot, n_query):
+        """Sample a few-shot learning episode"""
+        available_classes = np.unique(self.y_train)
+        if len(available_classes) < n_way:
+            return [], [], [], []
+        
+        episode_classes = np.random.choice(available_classes, n_way, replace=False)
+        
+        support_x, support_y, query_x, query_y = [], [], [], []
+        
+        for class_idx, class_label in enumerate(episode_classes):
+            class_indices = np.where(self.y_train == class_label)[0]
+            
+            if len(class_indices) < n_shot + n_query:
+                continue
+            
+            selected_indices = np.random.choice(
+                class_indices, n_shot + n_query, replace=False
+            )
+            
+            # Support set
+            support_indices = selected_indices[:n_shot]
+            support_x.extend(self.X_train[support_indices])
+            support_y.extend([class_idx] * n_shot)
+            
+            # Query set
+            query_indices = selected_indices[n_shot:n_shot + n_query]
+            query_x.extend(self.X_train[query_indices])
+            query_y.extend([class_idx] * n_query)
+        
+        return np.array(support_x), np.array(support_y), np.array(query_x), np.array(query_y)
+    
+    def _train_improved_method(self, model, method_name, n_way, n_shot, n_episodes=50, lr=0.001):
+        """Train an improved method using few-shot episodes"""
+        import torch
+        import torch.nn as nn
+        
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+        criterion = nn.CrossEntropyLoss()
+        
+        model.train()
+        
+        for episode in range(n_episodes):
+            support_x, support_y, query_x, query_y = self._sample_episode(n_way, n_shot, n_query=10)
+            
+            if len(support_x) == 0 or len(query_x) == 0:
+                continue
+            
+            # Convert to tensors
+            support_features = torch.tensor(support_x, dtype=torch.float32).to(self.device)
+            support_labels = torch.tensor(support_y, dtype=torch.long).to(self.device)
+            query_features = torch.tensor(query_x, dtype=torch.float32).to(self.device)
+            query_labels = torch.tensor(query_y, dtype=torch.long).to(self.device)
+            
+            # Forward pass
+            optimizer.zero_grad()
+            
+            if method_name == 'hybrid':
+                logits, _, _, _ = model(support_features, support_labels, 
+                                     query_features, n_way, n_shot)
+            else:
+                logits = model(support_features, support_labels, 
+                             query_features, n_way, n_shot)
+            
+            loss = criterion(logits, query_labels)
+            
+            # Backward pass
+            loss.backward()
+            optimizer.step()
+    
     def nearest_neighbor_baseline(self, n_shots, n_trials=50):
         """k-Nearest Neighbors baseline for few-shot learning"""
         print(f"\n🔍 Running k-NN Baseline: {n_shots}-shot")
@@ -325,6 +482,11 @@ class FewShotEvaluator:
             'linear': {'shots': [], 'mean': [], 'std': []}
         }
         
+        # Add improved methods if available
+        if IMPROVED_METHODS_AVAILABLE and hasattr(self, 'improved_models'):
+            for method_name in self.improved_models.keys():
+                results[method_name] = {'shots': [], 'mean': [], 'std': []}
+        
         for n_shots in shot_numbers:
             print(f"\n🎯 Evaluating {n_shots}-shot learning...")
             
@@ -347,6 +509,16 @@ class FewShotEvaluator:
             results['linear']['shots'].append(n_shots)
             results['linear']['mean'].append(linear_mean)
             results['linear']['std'].append(linear_std)
+            
+            # Improved Methods
+            if IMPROVED_METHODS_AVAILABLE and hasattr(self, 'improved_models'):
+                for method_name in self.improved_models.keys():
+                    improved_mean, improved_std = self.improved_prototypical_networks(
+                        method_name, n_way=4, n_shot=n_shots, n_episodes=min(n_trials, 30)
+                    )
+                    results[method_name]['shots'].append(n_shots)
+                    results[method_name]['mean'].append(improved_mean)
+                    results[method_name]['std'].append(improved_std)
         
         # Print summary
         self._print_results_summary(results)
@@ -558,7 +730,8 @@ def main():
     parser.add_argument('--data_path', type=str, default='./data/simulated_data/',
                        help='Path to dataset directory')
     parser.add_argument('--method', type=str, default='all', 
-                       choices=['prototypical', 'knn', 'linear', 'all'],
+                       choices=['prototypical', 'knn', 'linear', 'improved', 'all',
+                               'linear_prototypical', 'metric_prototypical', 'hybrid', 'adaptive'],
                        help='Few-shot method to evaluate')
     parser.add_argument('--shots', type=str, default='1,3,5,10,20',
                        help='Comma-separated list of shot numbers')
@@ -604,6 +777,22 @@ def main():
         print("📏 Running Linear Baseline Only")
         for n_shots in shot_numbers:
             evaluator.linear_baseline(n_shots, args.trials)
+    elif args.method == 'improved':
+        if IMPROVED_METHODS_AVAILABLE and hasattr(evaluator, 'improved_models'):
+            print("🚀 Running All Improved Methods")
+            for method_name in evaluator.improved_models.keys():
+                print(f"\n🎯 Testing {method_name}")
+                for n_shots in shot_numbers:
+                    evaluator.improved_prototypical_networks(method_name, n_way=4, n_shot=n_shots, n_episodes=args.trials)
+        else:
+            print("⚠️  Improved methods not available")
+    elif args.method in ['linear_prototypical', 'metric_prototypical', 'hybrid', 'adaptive']:
+        if IMPROVED_METHODS_AVAILABLE and hasattr(evaluator, 'improved_models'):
+            print(f"🎯 Running {args.method} Only")
+            for n_shots in shot_numbers:
+                evaluator.improved_prototypical_networks(args.method, n_way=4, n_shot=n_shots, n_episodes=args.trials)
+        else:
+            print(f"⚠️  {args.method} method not available")
     
     print("\n✅ Few-shot evaluation completed!")
     print("📊 Check ./plots/simulation/ for visualization results")
